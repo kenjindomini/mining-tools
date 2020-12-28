@@ -5,7 +5,7 @@ install:
 	go install
 
 test:
-	cd miningtools; go test -coverprofile coverage.out
+	$(MAKE) -C ./miningtools test
 
 testreport:
-	go tool cover -HTML coverage.out
+	$(MAKE) -C ./miningtools testreport
