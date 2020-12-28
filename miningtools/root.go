@@ -81,7 +81,8 @@ func initConfig() {
 
 		// Search config in home directory with name ".mining-tools" (without extension).
 		viper.AddConfigPath(home)
-		viper.SetConfigName(".mining-tools")
+		viper.SetConfigName("mining-tools.yml")
+		viper.SetConfigType("yaml")
 
 		fmt.Println(fmt.Sprintf("Reading config file %s\\%s, if it exists", home, ".mining-tools"))
 	}

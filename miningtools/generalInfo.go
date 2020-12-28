@@ -57,16 +57,16 @@ type MinerAvgHashrate struct {
 
 // MinerGeneralInfoWorker is for decoding json from a successful response of the nanopool miner general info api endpoint
 type MinerGeneralInfoWorker struct {
-	ID        string      `json:"id"`
-	UID       json.Number `json:"uid"`
-	Hashrate  string      `json:"hashrate"`
-	Lastshare json.Number `json:"lastshare"`
-	Rating    json.Number `json:"rating"`
-	H1        string      `json:"h1"`
-	H3        string      `json:"h3"`
-	H6        string      `json:"h6"`
-	H12       string      `json:"h12"`
-	H24       string      `json:"h24"`
+	ID        string `json:"id"`
+	UID       int64  `json:"uid"`
+	Hashrate  string `json:"hashrate"`
+	Lastshare int64  `json:"lastshare"`
+	Rating    int64  `json:"rating"`
+	H1        string `json:"h1"`
+	H3        string `json:"h3"`
+	H6        string `json:"h6"`
+	H12       string `json:"h12"`
+	H24       string `json:"h24"`
 }
 
 // MinerShareRate is for decoding json from a successful response of the nanopool miner general info api endpoint
@@ -77,13 +77,18 @@ type MinerShareRate struct {
 
 // MinerShareRateData is for decoding json from a successful response of the nanopool miner general info api endpoint
 type MinerShareRateData struct {
-	Date   json.Number `json:"date"`
-	Shares json.Number `json:"shares"`
+	Date   int64 `json:"date"`
+	Shares int64 `json:"shares"`
+}
+
+// HTTPClient is an interface to abstract http.client to support testing using mocks
+type HTTPClient interface {
+	Get(url string) (resp *http.Response, err error)
 }
 
 // generalInfoCmd represents the generalInfo sub-command of nanopool
 var (
-	apiClient          = &http.Client{Timeout: 10 * time.Second}
+	apiClient          = HTTPClient(&http.Client{Timeout: 10 * time.Second})
 	rewardPerShareFlag bool
 	sharesPerHour      bool
 	generalInfoCmd     = &cobra.Command{
@@ -91,35 +96,7 @@ var (
 		Short: "Gets general info of nanopool ethereum miner account",
 		Long: `Gets general info of nanopool ethereum miner account, with
 				options for calculating additional values`,
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("generalInfo called")
-			address := viper.GetString("nanopool.address")
-			apiRoot := viper.GetString("nanopool.apiRoot")
-			info, err := getMinerGeneralInfo(apiRoot, address)
-			if err != nil {
-				// TODO: Log error
-				fmt.Println(err)
-				// TODO: handle error
-				return
-			}
-			if rewardPerShareFlag {
-				balance, _ := strconv.ParseFloat(info.Data.Balance, 64)
-				totalPayouts, _ := strconv.ParseFloat("0", 64)
-				totalShares := calcTotalShares(info.Data.Workers)
-				info.Data.RewardPerShare = calcRPS(balance, totalPayouts, totalShares)
-			}
-			if sharesPerHour {
-				shareRate, err := getMinerShareRate(apiRoot, address)
-				if err != nil {
-					// TODO: Log error
-					fmt.Println(err)
-					// TODO: handle error
-					return
-				}
-				info.Data.SharesPerHour = calcSharesPerHour(shareRate.Data, 24)
-			}
-			prettyPrint(info)
-		},
+		Run: generalInfoCmdRun,
 	}
 )
 
@@ -137,6 +114,42 @@ func init() {
 	// generalInfoCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	generalInfoCmd.Flags().BoolVarP(&rewardPerShareFlag, "rewardPerShare", "r", false, "Include calculated attribute rewardPerShare (lifetime average)")
 	generalInfoCmd.Flags().BoolVarP(&sharesPerHour, "sharesPerHour", "s", false, "Include calculated attribute sharesPerHour (24h rolling average)")
+}
+
+func generalInfoCmdRun(cmd *cobra.Command, args []string) {
+	fmt.Println("generalInfo called")
+	address := viper.GetString("nanopool.address")
+	apiRoot := viper.GetString("nanopool.apiRoot")
+	info, err := getMinerGeneralInfo(apiRoot, address)
+	if err != nil {
+		// TODO: Log error
+		fmt.Println(err)
+		// TODO: handle error
+		return
+	}
+	if rewardPerShareFlag {
+		balance, _ := strconv.ParseFloat(info.Data.Balance, 64)
+		totalPayouts, _ := strconv.ParseFloat("0", 64)
+		totalShares := calcTotalShares(info.Data.Workers)
+		info.Data.RewardPerShare = calcRPS(balance, totalPayouts, totalShares)
+	}
+	if sharesPerHour {
+		shareRate, err := getMinerShareRate(apiRoot, address)
+		if err != nil {
+			// TODO: Log error
+			fmt.Println(err)
+			// TODO: handle error
+			return
+		}
+		info.Data.SharesPerHour = calcSharesPerHour(shareRate.Data, 24)
+	}
+	prettyPrint(info)
+	if err = viper.WriteConfig(); err != nil {
+		// TODO: Log error
+		fmt.Println(err)
+		// TODO: handle error
+		return
+	}
 }
 
 func prettyPrint(v interface{}) {
@@ -202,8 +215,7 @@ func calcRPS(balance float64, totalPayOuts float64, totalShares int64) (rps stri
 func calcTotalShares(workers []MinerGeneralInfoWorker) (totalShares int64) {
 	totalShares = 0
 	for _, w := range workers {
-		rating, _ := w.Rating.Int64()
-		totalShares += rating
+		totalShares += w.Rating
 	}
 	return
 }
@@ -212,15 +224,14 @@ func calcSharesPerHour(shareRate []MinerShareRateData, hours int64) (sharesPerHo
 	shares := int64(0)
 	srLen := int64(len(shareRate))
 	// Share Rate is returned in 10 minute segments and is ordered oldest to newest
-	// len - 1 gets us the index of the last element, then there are 6 elements per hour
-	sliceLow := srLen - 1 - (6 * hours)
+	// there are 6 elements per hour
+	sliceLow := srLen - (6 * hours)
 	if hours <= 0 {
 		sliceLow = 0
 		hours = int64(math.Round(float64(srLen / 6)))
 	}
 	for _, sr := range shareRate[sliceLow:] {
-		srShares, _ := sr.Shares.Int64()
-		shares += srShares
+		shares += sr.Shares
 	}
 	sharesPerHour = int64(math.Round(float64(shares / hours)))
 	return
