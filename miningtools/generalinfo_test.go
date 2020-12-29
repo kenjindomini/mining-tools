@@ -3,6 +3,7 @@ package miningtools
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"reflect"
@@ -29,6 +30,7 @@ func Test_getMinerShareRate(t *testing.T) {
 	mockClient := &mockAPIClient{}
 	apiClient = mockClient
 	mockClient.On("Get", "http://test.com/shareratehistory/0x01").Return(shareratehistory0x01Success, nil)
+	mockClient.On("Get", "http://test.com/shareratehistory/").Return(*new(MinerShareRate), errors.New("Timedout"))
 	type args struct {
 		apiRoot string
 		address string
@@ -47,6 +49,15 @@ func Test_getMinerShareRate(t *testing.T) {
 			},
 			wantShareRate: *shareratehistory0x01Success,
 			wantErr:       false,
+		},
+		{
+			name: "Error01",
+			args: args{
+				apiRoot: "http://test.com/",
+				address: "",
+			},
+			wantShareRate: *new(MinerShareRate),
+			wantErr:       true,
 		},
 	}
 	for _, tt := range tests {
@@ -111,6 +122,7 @@ func Test_calcSharesPerHour(t *testing.T) {
 		name              string
 		args              args
 		wantSharesPerHour int64
+		wantHours         int64
 	}{
 		{
 			name: "Simple01",
@@ -119,12 +131,37 @@ func Test_calcSharesPerHour(t *testing.T) {
 				hours:     24,
 			},
 			wantSharesPerHour: 60,
+			wantHours:         24,
+		},
+		{
+			name: "AllHours01",
+			args: args{
+				shareRate: shareratehistory0x01Success.Data,
+				hours:     -1,
+			},
+			wantSharesPerHour: 12048,
+			wantHours:         30,
+		},
+		{
+			name: "NotEnoutHistory01",
+			args: args{
+				shareRate: shareratehistory0x01Success.Data,
+				hours:     45,
+			},
+			wantSharesPerHour: 12048,
+			wantHours:         30,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if gotSharesPerHour := calcSharesPerHour(tt.args.shareRate, tt.args.hours); gotSharesPerHour != tt.wantSharesPerHour {
-				t.Errorf("calcSharesPerHour() = %v, want %v", gotSharesPerHour, tt.wantSharesPerHour)
+			hours := tt.args.hours
+			if gotSharesPerHour := calcSharesPerHour(tt.args.shareRate, &hours); gotSharesPerHour != tt.wantSharesPerHour || hours != tt.wantHours {
+				if gotSharesPerHour != tt.wantSharesPerHour {
+					t.Errorf("calcSharesPerHour(tt.args.shareRate, hours) = %v, want %v", gotSharesPerHour, tt.wantSharesPerHour)
+				}
+				if tt.args.hours != tt.wantHours {
+					t.Errorf("calcSharesPerHour(tt.args.shareRate, tt.args.hours) hours= %v, want %v", hours, tt.wantHours)
+				}
 			}
 		})
 	}
