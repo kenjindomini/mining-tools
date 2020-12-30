@@ -18,6 +18,10 @@ type mockAPIClient struct {
 	mock.Mock
 }
 
+func init() {
+	logLevel = 5
+}
+
 func (mac *mockAPIClient) Get(url string) (resp *http.Response, err error) {
 	args := mac.Called(url)
 	body, _ := json.Marshal(args.Get(0))

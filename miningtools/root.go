@@ -28,6 +28,8 @@ import (
 )
 
 var cfgFile string
+var logFile string
+var logLevel uint32
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -54,13 +56,15 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfig, initLog)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mining-tools.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (Default: $HOME/mining-tools.yaml)")
+	rootCmd.PersistentFlags().StringVar(&logFile, "log", "", "log file (Default:  $HOME/mining-tools.log)")
+	rootCmd.PersistentFlags().Uint32Var(&logLevel, "log-level", 4, "Sets global log level 5=Debug 0=Panic/virtually silent (Default: 4)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -97,12 +101,22 @@ func initConfig() {
 }
 
 func initLog() {
-	file, err := os.OpenFile("./logs/mining-tools.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if logFile == "" {
+		// Find home directory.
+		home, err := homedir.Dir()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		logFile = home + "\\mining-tools.log"
+	}
+
+	log.SetLevel(log.Level(logLevel))
+
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	defer file.Close()
 
 	log.SetOutput(file)
 }

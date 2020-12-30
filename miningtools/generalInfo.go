@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -127,51 +128,64 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// generalInfoCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-	generalInfoCmd.Flags().BoolVarP(&rewardPerShareFlag, "rewardPerShare", "r", false, "Include calculated attribute rewardPerShare (lifetime average)")
-	generalInfoCmd.Flags().BoolVarP(&sharesPerHourFlag, "sharesPerHour", "s", false, "Include calculated attribute sharesPerHour (24h rolling average)")
+	generalInfoCmd.Flags().BoolVarP(&rewardPerShareFlag, "rewardPerShare", "r", false,
+		"Include calculated attribute rewardPerShare (lifetime average)")
+	generalInfoCmd.Flags().BoolVarP(&sharesPerHourFlag, "sharesPerHour", "s", false,
+		"Include calculated attribute sharesPerHour (24h rolling average)")
 }
 
 func generalInfoCmdRun(cmd *cobra.Command, args []string) {
-	fmt.Println("generalInfo called")
+	log.Debugln("generalInfoCmdRun called")
 	address := viper.GetString("miningtools.nanopool.address")
 	apiRoot := viper.GetString("miningtools.nanopool.apiRoot")
+	log.Debugf("generalInfoCmdRun: address=%s; apiRoot=%s\n", address, apiRoot)
 	info, err := getMinerGeneralInfo(apiRoot, address)
 	if err != nil {
-		// TODO: Log error
 		fmt.Println(err)
+		log.Errorf("generalInfoCmdRun: getMinerGeneralInfo(apiRoot=%s, address=%s); returned err=%s\n",
+			apiRoot, address, err.Error())
 		// TODO: handle error
 		return
 	}
 	if rewardPerShareFlag {
 		payments, err := getMinerPayments(apiRoot, address)
 		if err != nil {
-			// TODO: Log error
 			fmt.Println(err)
+			log.Errorf("generalInfoCmdRun: getMinerPayments(apiRoot=%s, address=%s); returned err=%s\n",
+				apiRoot, address, err.Error())
 			// TODO: handle error
 			return
 		}
 		totalPayouts := calcTotalPayout(payments.Data)
 		totalShares := calcTotalShares(info.Data.Workers)
 		info.Data.RewardPerShare = calcRPS(info.Data.Balance, totalPayouts, totalShares)
+		log.Debugf("generalInfoCmdRun: totalPayouts=%s; totalShares=%d; info.Data.RewardPerShare=%s\n",
+			totalPayouts, totalShares, info.Data.RewardPerShare)
 	}
 	if sharesPerHourFlag {
 		hours := int64(24)
 		shareRate, err := getMinerShareRate(apiRoot, address)
 		if err != nil {
-			// TODO: Log error
 			fmt.Println(err)
+			log.Errorf("generalInfoCmdRun: getMinerShareRate(apiRoot=%s, address=%s); returned err=%s\n",
+				apiRoot, address, err.Error())
 			// TODO: handle error
 			return
 		}
 		info.Data.SharesPerHour = calcSharesPerHour(shareRate.Data, &hours)
+		log.Debugf("generalInfoCmdRun: info.Data.SharesPerHour=%s\n", info.Data.SharesPerHour)
 	}
 	if rewardPerShareFlag && sharesPerHourFlag {
 		info.Data.RewardPerHour = calcRewardPerHour(info.Data.RewardPerShare, info.Data.SharesPerHour)
+		log.Debugf("generalInfoCmdRun: info.Data.RewardPerHour=%s\n", info.Data.RewardPerHour)
 	}
 	prettyPrint(info)
+	// TODO: updating the saved config should be optional
+	// TODO: break this out to check if writing is desired and
+	//	create the file if viper fails to, then retry
 	if err = viper.WriteConfig(); err != nil {
-		// TODO: Log error
 		fmt.Println(err)
+		log.Errorf("viper.WriteConfig(); returned err=%s\n", err.Error())
 		// TODO: handle error
 		return
 	}
@@ -190,18 +204,19 @@ func prettyPrint(v interface{}) {
 }
 
 func getMinerGeneralInfo(apiRoot string, address string) (info MinerGeneralInfo, err error) {
+	log.Debugln("getMinerGeneralInfo called")
 	resp, err := apiClient.Get(fmt.Sprintf("%s%s%s", apiRoot, "user/", address))
 	if err != nil {
-		// TODO: Log error
 		fmt.Println(err)
+		log.Errorf("getMinerGeneralInfo: apiClient.Get(%suser/%s); returned err=%s\n", apiRoot, address, err.Error())
 		// TODO: handle error
 		return
 	}
 	defer resp.Body.Close()
 	err = json.NewDecoder(resp.Body).Decode(&info)
 	if err != nil {
-		// TODO: Log error
 		fmt.Println(err)
+		log.Errorf("getMinerGeneralInfo: json.NewDecoder(resp.Body).Decode(&info); returned err=%s\n", err.Error())
 		// TODO: handle error
 		return
 	}
@@ -263,7 +278,6 @@ func calcTotalShares(workers []MinerGeneralInfoWorker) (totalShares int64) {
 }
 
 func calcSharesPerHour(shareRate []MinerShareRateData, hours *int64) (sharesPerHour int64) {
-	fmt.Printf("len(shareRate) = %d\n", len(shareRate)) //debug
 	shares := int64(0)
 	now := time.Now().UTC()
 	d := time.Duration(10 * time.Minute)
