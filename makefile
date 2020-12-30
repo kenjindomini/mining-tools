@@ -5,7 +5,7 @@ install:
 	go install
 
 test:
-	$(MAKE) -C ./miningtools test
+	$(MAKE) -C ./cmd test
 
 testreport:
-	$(MAKE) -C ./miningtools testreport
+	$(MAKE) -C ./cmd testreport

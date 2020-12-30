@@ -15,7 +15,7 @@ limitations under the License.
 */
 package main
 
-import "mining-tools/miningtools"
+import miningtools "mining-tools/cmd"
 
 func main() {
 	miningtools.Execute()
