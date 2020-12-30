@@ -133,8 +133,8 @@ func init() {
 
 func generalInfoCmdRun(cmd *cobra.Command, args []string) {
 	fmt.Println("generalInfo called")
-	address := viper.GetString("nanopool.address")
-	apiRoot := viper.GetString("nanopool.apiRoot")
+	address := viper.GetString("miningtools.nanopool.address")
+	apiRoot := viper.GetString("miningtools.nanopool.apiRoot")
 	info, err := getMinerGeneralInfo(apiRoot, address)
 	if err != nil {
 		// TODO: Log error
@@ -263,21 +263,27 @@ func calcTotalShares(workers []MinerGeneralInfoWorker) (totalShares int64) {
 }
 
 func calcSharesPerHour(shareRate []MinerShareRateData, hours *int64) (sharesPerHour int64) {
-	h := *hours
+	fmt.Printf("len(shareRate) = %d\n", len(shareRate)) //debug
 	shares := int64(0)
-	srLen := int64(len(shareRate))
-	// Share Rate is returned in 10 minute segments and is ordered oldest to newest
-	// there are 6 elements per hour
-	sliceLow := srLen - (6 * h)
-	if h <= 0 || sliceLow < 0 {
-		sliceLow = 0
-		h = int64(math.Round(float64(srLen / 6)))
-		*hours = h
+	now := time.Now().UTC()
+	d := time.Duration(10 * time.Minute)
+	hoursAgo := now.Add(time.Duration(*hours) * -1 * time.Hour)
+	thePast := hoursAgo.Truncate(d).Unix()
+	oldestEntry := now.Unix()
+	for _, sr := range shareRate {
+		if oldestEntry > thePast {
+			if sr.Date < oldestEntry {
+				oldestEntry = sr.Date
+			}
+		}
+		if sr.Date > thePast {
+			shares += sr.Shares
+		}
 	}
-	for _, sr := range shareRate[sliceLow:] {
-		shares += sr.Shares
+	if oldestEntry > thePast {
+		*hours = int64(math.Round(float64(now.Unix()-oldestEntry) / 60 / 60))
 	}
-	sharesPerHour = int64(math.Round(float64(shares / h)))
+	sharesPerHour = int64(math.Round(float64(shares / *hours)))
 	return
 }
 

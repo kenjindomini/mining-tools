@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -93,4 +94,15 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
+}
+
+func initLog() {
+	file, err := os.OpenFile("./logs/mining-tools.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer file.Close()
+
+	log.SetOutput(file)
 }
