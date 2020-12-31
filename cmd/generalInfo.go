@@ -97,6 +97,12 @@ type MinerPaymentsData struct {
 	Confirmed bool    `json:"confirmed"`
 }
 
+// MinerBalance is for decoding json from a successful response of the nanopool miner general info api endpoint
+type MinerBalance struct {
+	Status bool    `json:"status"`
+	Data   float64 `json:"data"`
+}
+
 // HTTPClient is an interface to abstract http.client to support testing using mocks
 type HTTPClient interface {
 	Get(url string) (resp *http.Response, err error)
@@ -255,6 +261,25 @@ func getMinerShareRate(apiRoot string, address string) (shareRate MinerShareRate
 	if err != nil {
 		// TODO: Log error
 		fmt.Println(err)
+		// TODO: handle error
+		return
+	}
+	return
+}
+
+func getMinerBalance(apiRoot string, address string) (minerBalance MinerBalance, err error) {
+	resp, err := apiClient.Get(fmt.Sprintf("%s%s%s", apiRoot, "balance/", address))
+	if err != nil {
+		fmt.Println(err)
+		log.Errorf("getMinerBalance: apiClient.Get(%balance/%s); returned err=%s\n", apiRoot, address, err.Error())
+		// TODO: handle error
+		return
+	}
+	defer resp.Body.Close()
+	err = json.NewDecoder(resp.Body).Decode(&minerBalance)
+	if err != nil {
+		fmt.Println(err)
+		log.Errorf("getMinerBalance: json.NewDecoder(resp.Body).Decode(&minerBalance); returned err=%s\n", err.Error())
 		// TODO: handle error
 		return
 	}

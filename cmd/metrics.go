@@ -17,9 +17,12 @@ limitations under the License.
 package miningtools
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +47,38 @@ func (ps *PoolStats) InfluxDBLine(table string) (payload []byte) {
 	return
 }
 
+// FinancialStats is a struct for tracking some metrics relevant to financial health of mining operations
+type FinancialStats struct {
+	EthereumValue         float64
+	EthereumValueDelta    float64
+	PoolBalanceValueTotal float64
+	PoolBalanceValueDelta float64
+	DeltaWindow           int64 // in nano seconds
+}
+
+// InfluxDBLine will convert the struct to a byte slice for delivery as a network payload
+func (fs *FinancialStats) InfluxDBLine(table string) (payload []byte) {
+	payload = []byte(fmt.Sprintf("%s,EthereumValue=%f EthereumValueDelta=%f PoolBalanceValueTotal=%f PoolBalanceValueDelta=%f DeltaWindow=%d %d\n",
+		table, fs.EthereumValue, fs.EthereumValueDelta, fs.PoolBalanceValueTotal, fs.PoolBalanceValueDelta, fs.DeltaWindow, time.Now().UTC().UnixNano()))
+	return
+}
+
+// QuestDBResponse is the expected shape of a successful response to a query
+type QuestDBResponse struct {
+	Query   string          `json:"query"`
+	Columns []interface{}   `json:"columns"`
+	Dataset [][]interface{} `json:"dataset"`
+	Count   int64           `json:"count"`
+	Timings interface{}     `json:"timings"`
+}
+
+// QuestDBErrorResponse is the expected shape of an error response to a query
+type QuestDBErrorResponse struct {
+	Query    string `json:"query"`
+	Error    string `json:"error"`
+	Position int64  `json:"position"`
+}
+
 // metricsCmd represents the metrics command
 var metricsCmd = &cobra.Command{
 	Use:   "metrics",
@@ -54,9 +89,11 @@ and usage of using your command. For example:
 Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("metrics called")
-	},
+	Run: metricsCmdRun,
+}
+
+func metricsCmdRun(cmd *cobra.Command, args []string) {
+	log.Debugln("metricsCmdRun called")
 }
 
 func init() {
@@ -71,4 +108,66 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// metricsCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	metricsCmd.Flags().BoolP("dryrun", "d", false, "Print metrics instead of shipping them to a timeseries DB")
+	metricsCmd.Flags().BoolP("first-run", "f", false, "First run, use this flag to automate some setup like create questDB tables")
+}
+
+func collectPoolStats() (poolStats PoolStats, err error) {
+	return
+}
+
+func collectFinancialStats() (financialStats FinancialStats, err error) {
+	return
+}
+
+func createTables() {
+	tables := []string{
+		"pool",
+		"financial",
+	}
+	queryFmt := "CREATE TABLE %s"
+	for _, t := range tables {
+		queryQuestDB("http://localhost:9000", fmt.Sprintf(queryFmt, t), new(Metrics))
+	}
+}
+
+func getLastTimeSeries(table string, metrics *Metrics) {
+	query := fmt.Sprintf("%s LATEST BY timestamp", table)
+	queryQuestDB("http://localhost:9000", query, metrics)
+}
+
+func queryQuestDB(apiRoot string, query string, metrics *Metrics) (err error) {
+	u, err := url.Parse(apiRoot)
+	if err != nil {
+		fmt.Println(err)
+		log.Errorf("queryQuestDB: url.Parse(%s); returned err=%s\n", apiRoot, err.Error())
+		// TODO: handle error
+		return
+	}
+
+	u.Path += "exec"
+	params := url.Values{}
+	params.Add("query", query)
+	u.RawQuery = params.Encode()
+	url := fmt.Sprintf("%v", u)
+
+	resp, err := apiClient.Get(url)
+	if err != nil {
+		fmt.Println(err)
+		log.Errorf("queryQuestDB: apiClient.Get(%s); returned err=%s\n", url, err.Error())
+		// TODO: handle error
+		return
+	}
+
+	defer resp.Body.Close()
+
+	questDBResponse := new(QuestDBResponse)
+	err = json.NewDecoder(resp.Body).Decode(&questDBResponse)
+	if err != nil {
+		fmt.Println(err)
+		log.Errorf("queryQuestDB: json.NewDecoder(resp.Body).Decode(&minerBalance); returned err=%s\n", err.Error())
+		// TODO: handle error
+		return
+	}
+	return
 }
