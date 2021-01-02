@@ -23,12 +23,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// NanopoolError is a struct for marshaling json of any error coming from nanopool's API
-type NanopoolError struct {
-	Status bool   `json:"status"`
-	Error  string `json:"error"`
-}
-
 // nanopoolCmd represents the nanopool command
 var nanopoolCmd = &cobra.Command{
 	Use:   "nanopool",

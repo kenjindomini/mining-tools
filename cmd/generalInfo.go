@@ -20,97 +20,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"strconv"
 	"time"
+
+	"mining-tools/nanopool"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// MinerGeneralInfo is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerGeneralInfo struct {
-	Status bool                 `json:"status"`
-	Data   MinerGeneralInfoData `json:"data"`
-}
-
-// MinerGeneralInfoData is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerGeneralInfoData struct {
-	Account            string                   `json:"account"`
-	UnconfirmedBalance string                   `json:"unconfirmed_balance"`
-	Balance            string                   `json:"balance"`
-	Hashrate           string                   `json:"hashrate"`
-	AvgHashrate        MinerAvgHashrate         `json:"avgHashrate"`
-	Workers            []MinerGeneralInfoWorker `json:"workers"`
-	RewardPerShare     string                   `json:"rewardPerShare,omitempty"`
-	SharesPerHour      int64                    `json:"sharesPerHour,omitempty"`
-	RewardPerHour      string                   `json:"rewardPerHour,omitempty"`
-}
-
-// MinerAvgHashrate is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerAvgHashrate struct {
-	H1  string `json:"h1"`
-	H3  string `json:"h3"`
-	H6  string `json:"h6"`
-	H12 string `json:"h12"`
-	H24 string `json:"h24"`
-}
-
-// MinerGeneralInfoWorker is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerGeneralInfoWorker struct {
-	ID        string `json:"id"`
-	UID       int64  `json:"uid"`
-	Hashrate  string `json:"hashrate"`
-	Lastshare int64  `json:"lastshare"`
-	Rating    int64  `json:"rating"`
-	H1        string `json:"h1"`
-	H3        string `json:"h3"`
-	H6        string `json:"h6"`
-	H12       string `json:"h12"`
-	H24       string `json:"h24"`
-}
-
-// MinerShareRate is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerShareRate struct {
-	Status bool                 `json:"status"`
-	Data   []MinerShareRateData `json:"data"`
-}
-
-// MinerShareRateData is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerShareRateData struct {
-	Date   int64 `json:"date"`
-	Shares int64 `json:"shares"`
-}
-
-// MinerPayments is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerPayments struct {
-	Status bool                `json:"status"`
-	Data   []MinerPaymentsData `json:"data"`
-}
-
-// MinerPaymentsData is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerPaymentsData struct {
-	Date      int64   `json:"date"`
-	TXHash    string  `json:"txHash"`
-	Amount    float64 `json:"amount"`
-	Confirmed bool    `json:"confirmed"`
-}
-
-// MinerBalance is for decoding json from a successful response of the nanopool miner general info api endpoint
-type MinerBalance struct {
-	Status bool    `json:"status"`
-	Data   float64 `json:"data"`
-}
-
-// HTTPClient is an interface to abstract http.client to support testing using mocks
-type HTTPClient interface {
-	Get(url string) (resp *http.Response, err error)
-}
-
 // generalInfoCmd represents the generalInfo sub-command of nanopool
 var (
-	apiClient          = HTTPClient(&http.Client{Timeout: 10 * time.Second})
 	rewardPerShareFlag bool
 	sharesPerHourFlag  bool
 	generalInfoCmd     = &cobra.Command{
@@ -145,7 +66,7 @@ func generalInfoCmdRun(cmd *cobra.Command, args []string) {
 	address := viper.GetString("miningtools.nanopool.address")
 	apiRoot := viper.GetString("miningtools.nanopool.apiRoot")
 	log.Debugf("generalInfoCmdRun: address=%s; apiRoot=%s\n", address, apiRoot)
-	info, err := getMinerGeneralInfo(apiRoot, address)
+	info, err := nanopool.GetMinerGeneralInfo(apiRoot, address)
 	if err != nil {
 		fmt.Println(err)
 		log.Errorf("generalInfoCmdRun: getMinerGeneralInfo(apiRoot=%s, address=%s); returned err=%s\n",
@@ -154,7 +75,7 @@ func generalInfoCmdRun(cmd *cobra.Command, args []string) {
 		return
 	}
 	if rewardPerShareFlag {
-		payments, err := getMinerPayments(apiRoot, address)
+		payments, err := nanopool.GetMinerPayments(apiRoot, address)
 		if err != nil {
 			fmt.Println(err)
 			log.Errorf("generalInfoCmdRun: getMinerPayments(apiRoot=%s, address=%s); returned err=%s\n",
@@ -170,7 +91,7 @@ func generalInfoCmdRun(cmd *cobra.Command, args []string) {
 	}
 	if sharesPerHourFlag {
 		hours := int64(24)
-		shareRate, err := getMinerShareRate(apiRoot, address)
+		shareRate, err := nanopool.GetMinerShareRate(apiRoot, address)
 		if err != nil {
 			fmt.Println(err)
 			log.Errorf("generalInfoCmdRun: getMinerShareRate(apiRoot=%s, address=%s); returned err=%s\n",
@@ -209,83 +130,6 @@ func prettyPrint(v interface{}) {
 	fmt.Println(out)
 }
 
-func getMinerGeneralInfo(apiRoot string, address string) (info MinerGeneralInfo, err error) {
-	log.Debugln("getMinerGeneralInfo called")
-	resp, err := apiClient.Get(fmt.Sprintf("%s%s%s", apiRoot, "user/", address))
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("getMinerGeneralInfo: apiClient.Get(%suser/%s); returned err=%s\n", apiRoot, address, err.Error())
-		// TODO: handle error
-		return
-	}
-	defer resp.Body.Close()
-	err = json.NewDecoder(resp.Body).Decode(&info)
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("getMinerGeneralInfo: json.NewDecoder(resp.Body).Decode(&info); returned err=%s\n", err.Error())
-		// TODO: handle error
-		return
-	}
-	return
-}
-
-func getMinerPayments(apiRoot string, address string) (payments MinerPayments, err error) {
-	resp, err := apiClient.Get(fmt.Sprintf("%s%s%s", apiRoot, "payments/", address))
-	if err != nil {
-		// TODO: Log error
-		fmt.Println(err)
-		// TODO: handle error
-		return
-	}
-	defer resp.Body.Close()
-	err = json.NewDecoder(resp.Body).Decode(&payments)
-	if err != nil {
-		// TODO: Log error
-		fmt.Println(err)
-		// TODO: handle error
-		return
-	}
-	return
-}
-
-func getMinerShareRate(apiRoot string, address string) (shareRate MinerShareRate, err error) {
-	resp, err := apiClient.Get(fmt.Sprintf("%s%s%s", apiRoot, "shareratehistory/", address))
-	if err != nil {
-		// TODO: Log error
-		fmt.Println(err)
-		// TODO: handle error
-		return
-	}
-	defer resp.Body.Close()
-	err = json.NewDecoder(resp.Body).Decode(&shareRate)
-	if err != nil {
-		// TODO: Log error
-		fmt.Println(err)
-		// TODO: handle error
-		return
-	}
-	return
-}
-
-func getMinerBalance(apiRoot string, address string) (minerBalance MinerBalance, err error) {
-	resp, err := apiClient.Get(fmt.Sprintf("%s%s%s", apiRoot, "balance/", address))
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("getMinerBalance: apiClient.Get(%balance/%s); returned err=%s\n", apiRoot, address, err.Error())
-		// TODO: handle error
-		return
-	}
-	defer resp.Body.Close()
-	err = json.NewDecoder(resp.Body).Decode(&minerBalance)
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("getMinerBalance: json.NewDecoder(resp.Body).Decode(&minerBalance); returned err=%s\n", err.Error())
-		// TODO: handle error
-		return
-	}
-	return
-}
-
 func calcRPS(balance string, totalPayouts string, totalShares int64) (rps string) {
 	bal, _ := strconv.ParseFloat(balance, 64)
 	payouts, _ := strconv.ParseFloat(totalPayouts, 64)
@@ -294,7 +138,7 @@ func calcRPS(balance string, totalPayouts string, totalShares int64) (rps string
 	return
 }
 
-func calcTotalShares(workers []MinerGeneralInfoWorker) (totalShares int64) {
+func calcTotalShares(workers []nanopool.MinerGeneralInfoWorker) (totalShares int64) {
 	totalShares = 0
 	for _, w := range workers {
 		totalShares += w.Rating
@@ -302,7 +146,7 @@ func calcTotalShares(workers []MinerGeneralInfoWorker) (totalShares int64) {
 	return
 }
 
-func calcSharesPerHour(shareRate []MinerShareRateData, hours *int64) (sharesPerHour int64) {
+func calcSharesPerHour(shareRate []nanopool.MinerShareRateData, hours *int64) (sharesPerHour int64) {
 	shares := int64(0)
 	now := time.Now().UTC()
 	d := time.Duration(10 * time.Minute)
@@ -333,7 +177,7 @@ func calcRewardPerHour(rewardPerShare string, sharesPerHour int64) (rewardPerHou
 	return
 }
 
-func calcTotalPayout(payments []MinerPaymentsData) (totalPayout string) {
+func calcTotalPayout(payments []nanopool.MinerPaymentsData) (totalPayout string) {
 	if len(payments) == 0 {
 		return "0"
 	}

@@ -88,12 +88,12 @@ func initConfig() {
 			os.Exit(1)
 		}
 
-		// Search config in home directory with name ".mining-tools" (without extension).
+		// Search config in home directory with name "mining-tools.yml".
 		viper.AddConfigPath(home)
 		viper.SetConfigName("mining-tools.yml")
 		viper.SetConfigType("yaml")
 
-		fmt.Println(fmt.Sprintf("Reading config file %s\\%s, if it exists", home, ".mining-tools"))
+		fmt.Println(fmt.Sprintf("Reading config file %s\\%s, if it exists", home, "mining-tools.yml"))
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
@@ -101,6 +101,8 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	} else {
+		fmt.Printf("Error reading config file: %s\n", err.Error())
 	}
 }
 
