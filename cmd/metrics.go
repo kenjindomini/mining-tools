@@ -18,6 +18,7 @@ package miningtools
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"mining-tools/nanopool"
@@ -33,28 +34,28 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Metrics is an interface to cover the various stats and metrics structs that may be created over time
-type Metrics interface {
+// Metric is an interface to cover the various stats and metrics structs that may be created over time
+type Metric interface {
 	InfluxDBLine() []byte
 }
 
-// PoolStats is a struct for tracking some metrics gathered and calculated from the mining pool
-type PoolStats struct {
+// PoolMetric is a struct for tracking some metrics gathered and calculated from the mining pool
+type PoolMetric struct {
 	Location string
 	Balance  float64
 	Shares   int64
 }
 
 // InfluxDBLine will convert the struct to a byte slice for delivery as a network payload
-func (ps *PoolStats) InfluxDBLine(table string) (payload []byte) {
+func (ps *PoolMetric) InfluxDBLine(table string) (payload []byte) {
 	balance := floatToStringNoTrail(ps.Balance)
 	payload = []byte(fmt.Sprintf("%s,Location=%s Balance=%s,Shares=%d %d\n",
 		table, ps.Location, balance, ps.Shares, time.Now().UTC().UnixNano()))
 	return
 }
 
-// FinancialStats is a struct for tracking some metrics relevant to financial health of mining operations
-type FinancialStats struct {
+// FinancialMetric is a struct for tracking some metrics relevant to financial health of mining operations
+type FinancialMetric struct {
 	Location    string
 	EthereumUSD float64
 	BalanceETH  float64
@@ -63,7 +64,7 @@ type FinancialStats struct {
 }
 
 // InfluxDBLine will convert the struct to a byte slice for delivery as a network payload
-func (fs *FinancialStats) InfluxDBLine(table string) (payload []byte) {
+func (fs *FinancialMetric) InfluxDBLine(table string) (payload []byte) {
 	eth := floatToStringNoTrail(fs.EthereumUSD)
 	balETH := floatToStringNoTrail(fs.BalanceETH)
 	balUSD := floatToStringNoTrail(fs.BalanceUSD)
@@ -86,7 +87,7 @@ func (qsr *QuestDBSuccessResponse) isErrorResponse() bool {
 	return false
 }
 
-// QuestDBColumns is the expected shape of the Columns field from a successful QuestDB success response
+// QuestDBColumns is the expected shape of the Columns field from a QuestDB success response
 type QuestDBColumns struct {
 	Name string
 	Type string
@@ -182,7 +183,7 @@ func init() {
 	metricsCmd.Flags().BoolVarP(&dryRunFlag, "dryrun", "d", false, "Print metrics instead of shipping them to a timeseries DB")
 }
 
-func collectPoolStats() (poolStats PoolStats, err error) {
+func collectPoolStats() (poolStats PoolMetric, err error) {
 	poolStats.Location = "nanopool"
 	nanoAPIRoot := viper.GetString("miningtools.nanopool.apiroot")
 	nanoAddress := viper.GetString("miningtools.nanopool.address")
@@ -218,7 +219,7 @@ func collectPoolStats() (poolStats PoolStats, err error) {
 	return
 }
 
-func collectNanopoolFinancialStats() (financialStats FinancialStats, err error) {
+func collectNanopoolFinancialStats() (financialStats FinancialMetric, err error) {
 	financialStats.Location = "nanopool"
 	nanoAPIRoot := viper.GetString("miningtools.nanopool.apiroot")
 	nanoAddress := viper.GetString("miningtools.nanopool.address")
@@ -244,7 +245,7 @@ func collectNanopoolFinancialStats() (financialStats FinancialStats, err error) 
 	return
 }
 
-func collectWalletFinancialStats() (financialStats FinancialStats, err error) {
+func collectWalletFinancialStats() (financialStats FinancialMetric, err error) {
 	financialStats.Location = "wallet"
 	nanoAPIRoot := viper.GetString("miningtools.nanopool.apiroot")
 	etherscanAPIRoot := viper.GetString("miningtools.etherscan.apiroot")
@@ -271,9 +272,18 @@ func collectWalletFinancialStats() (financialStats FinancialStats, err error) {
 	return
 }
 
-func getLastTimeSeries(table string, metrics *Metrics) {
-	query := fmt.Sprintf("%s LATEST BY timestamp", table)
-	queryQuestDB("http://localhost:9000", query)
+func getLastTimeSeries(table string) (metrics []Metric) {
+	// NOTE potentially useful: financial LATEST BY location WHERE timestamp <= '2021-01-03T01:05:00' UNION financial LATEST BY location;
+	// replace timestamp with a calculated value to get the latest and another from a desired point in the past
+	query := fmt.Sprintf("%s LATEST BY location", table)
+	response, err := queryQuestDB("http://localhost:9000", query)
+	checkError(err, fmt.Sprintf("getLastTimeSeries: queryQuestDB(http://localhost:9000, %s) returned error: %s", query, "%s"), nil)
+	if response.isErrorResponse() {
+		checkPanic(errors.New("QuestDB query resulted in an error response"), fmt.Sprintf("getLastTimeSeries: %s: %v", "%s", response), nil)
+	}
+	successResponse := response.(*QuestDBSuccessResponse)
+	metrics = coerceQuestDBToMetrics(table, *successResponse)
+	return
 }
 
 func queryQuestDB(apiRoot string, query string) (response QuestDBResponse, err error) {
@@ -397,5 +407,9 @@ func getWalletBalance(apiRoot string, address string) (accountBalance EtherscanA
 func floatToStringNoTrail(number float64) (noTrail string) {
 	noTrail = fmt.Sprintf("%.12f", number)
 	noTrail = strings.TrimRight(noTrail, "0")
+	return
+}
+
+func coerceQuestDBToMetrics(table string, response QuestDBSuccessResponse) (metrics []Metric) {
 	return
 }
