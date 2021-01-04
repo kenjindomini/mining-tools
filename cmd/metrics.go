@@ -37,21 +37,31 @@ import (
 // Metric is an interface to cover the various stats and metrics structs that may be created over time
 type Metric interface {
 	InfluxDBLine() []byte
+	FromQuestDB(columns []QuestDBColumns, dataset []interface{})
 }
 
 // PoolMetric is a struct for tracking some metrics gathered and calculated from the mining pool
 type PoolMetric struct {
-	Location string
-	Balance  float64
-	Shares   int64
+	Location  string
+	Balance   float64
+	Shares    int64
+	Timestamp time.Time
 }
 
 // InfluxDBLine will convert the struct to a byte slice for delivery as a network payload
 func (ps *PoolMetric) InfluxDBLine(table string) (payload []byte) {
+	if ps.Timestamp.IsZero() {
+		ps.Timestamp = time.Now()
+	}
 	balance := floatToStringNoTrail(ps.Balance)
 	payload = []byte(fmt.Sprintf("%s,Location=%s Balance=%s,Shares=%d %d\n",
-		table, ps.Location, balance, ps.Shares, time.Now().UTC().UnixNano()))
+		table, ps.Location, balance, ps.Shares, ps.Timestamp.UTC().UnixNano()))
 	return
+}
+
+// FromQuestDB will take the columns and data set of a questDB response and use it to populate the Metric object
+func (ps *PoolMetric) FromQuestDB(columns []QuestDBColumns, dataset []interface{}) {
+	//
 }
 
 // FinancialMetric is a struct for tracking some metrics relevant to financial health of mining operations
@@ -61,17 +71,57 @@ type FinancialMetric struct {
 	BalanceETH  float64
 	BalanceUSD  float64
 	BalanceBTC  float64
+	Timestamp   time.Time
 }
 
 // InfluxDBLine will convert the struct to a byte slice for delivery as a network payload
 func (fs *FinancialMetric) InfluxDBLine(table string) (payload []byte) {
+	if fs.Timestamp.IsZero() {
+		fs.Timestamp = time.Now()
+	}
 	eth := floatToStringNoTrail(fs.EthereumUSD)
 	balETH := floatToStringNoTrail(fs.BalanceETH)
 	balUSD := floatToStringNoTrail(fs.BalanceUSD)
 	balBTC := floatToStringNoTrail(fs.BalanceBTC)
 	payload = []byte(fmt.Sprintf("%s,Location=%s EthereumUSD=%s,BalanceETH=%s,BalanceUSD=%s,BalanceBTC=%s %d\n",
-		table, fs.Location, eth, balETH, balUSD, balBTC, time.Now().UTC().UnixNano()))
+		table, fs.Location, eth, balETH, balUSD, balBTC, fs.Timestamp.UTC().UnixNano()))
 	return
+}
+
+// FromQuestDB will take the columns and data set of a questDB response and use it to populate the Metric object
+func (fs *FinancialMetric) FromQuestDB(columns []QuestDBColumns, dataset []interface{}) {
+	var (
+		locationIndex    int
+		ethereumUSDIndex int
+		balanceETHIndex  int
+		balanceUSDIndex  int
+		balanceBTCIndex  int
+		timestampIndex   int
+	)
+	for i, c := range columns {
+		switch c.Name {
+		case "Location":
+			locationIndex = i
+		case "EthereumUSD":
+			ethereumUSDIndex = i
+		case "BalanceETH":
+			balanceETHIndex = i
+		case "BalanceUSD":
+			balanceUSDIndex = i
+		case "BalanceBTC":
+			balanceBTCIndex = i
+		case "timestamp":
+			timestampIndex = i
+		default:
+			log.Warnf("FinancialMetric.FromQuestDB: Unexpected column '%s' found in QuestDB table")
+		}
+	}
+	fs.Location = dataset[locationIndex].(string)
+	fs.EthereumUSD = dataset[ethereumUSDIndex].(float64)
+	fs.BalanceETH = dataset[balanceETHIndex].(float64)
+	fs.BalanceUSD = dataset[balanceUSDIndex].(float64)
+	fs.BalanceBTC = dataset[balanceBTCIndex].(float64)
+	fs.Timestamp = dataset[timestampIndex].(time.Time)
 }
 
 // QuestDBSuccessResponse is the expected shape of a successful response to a query
@@ -138,29 +188,18 @@ var (
 func metricsCmdRun(cmd *cobra.Command, args []string) {
 	log.Debugln("metricsCmdRun called")
 	poolStats, err := collectPoolStats()
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("metricsCmdRun: collectPoolStats(); returned err=%s\n", err.Error())
-		// TODO: handle error
-		return
+	var payload []byte
+	if !checkError(err, "metricsCmdRun: collectPoolStats(); returned err=%s\n", nil) {
+		payload = poolStats.InfluxDBLine("pool")
 	}
-	payload := poolStats.InfluxDBLine("pool")
 	nanoStats, err := collectNanopoolFinancialStats()
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("metricsCmdRun: collectFinancialStats(); returned err=%s\n", err.Error())
-		// TODO: handle error
-		return
+	if !checkError(err, "metricsCmdRun: collectFinancialStats(); returned err=%s\n", nil) {
+		payload = append(payload, nanoStats.InfluxDBLine("financial")...)
 	}
-	payload = append(payload, nanoStats.InfluxDBLine("financial")...)
 	walletStats, err := collectWalletFinancialStats()
-	if err != nil {
-		fmt.Println(err)
-		log.Errorf("metricsCmdRun: collectWalletFinancialStats(); returned err=%s\n", err.Error())
-		// TODO: handle error
-		return
+	if !checkError(err, "metricsCmdRun: collectWalletFinancialStats(); returned err=%s\n", nil) {
+		payload = append(payload, walletStats.InfluxDBLine("financial")...)
 	}
-	payload = append(payload, walletStats.InfluxDBLine("financial")...)
 	if !dryRunFlag {
 		insertQuestDB("127.0.0.1:9009", payload)
 	} else {
@@ -272,17 +311,17 @@ func collectWalletFinancialStats() (financialStats FinancialMetric, err error) {
 	return
 }
 
-func getLastTimeSeries(table string) (metrics []Metric) {
+func getLastTimeSeries(table string) (metrics []interface{}) {
 	// NOTE potentially useful: financial LATEST BY location WHERE timestamp <= '2021-01-03T01:05:00' UNION financial LATEST BY location;
 	// replace timestamp with a calculated value to get the latest and another from a desired point in the past
 	query := fmt.Sprintf("%s LATEST BY location", table)
 	response, err := queryQuestDB("http://localhost:9000", query)
-	checkError(err, fmt.Sprintf("getLastTimeSeries: queryQuestDB(http://localhost:9000, %s) returned error: %s", query, "%s"), nil)
+	checkError(err, fmt.Sprintf("getLastTimeSeries: queryQuestDB(http://localhost:9000, %s) returned error: %s\n", query, "%s"), nil)
 	if response.isErrorResponse() {
-		checkPanic(errors.New("QuestDB query resulted in an error response"), fmt.Sprintf("getLastTimeSeries: %s: %v", "%s", response), nil)
+		checkPanic(errors.New("QuestDB query resulted in an error response"), fmt.Sprintf("getLastTimeSeries: %s: %v\n", "%s", response), nil)
 	}
 	successResponse := response.(*QuestDBSuccessResponse)
-	metrics = coerceQuestDBToMetrics(table, *successResponse)
+	metrics, err = coerceQuestDBToMetrics(table, *successResponse)
 	return
 }
 
@@ -410,6 +449,22 @@ func floatToStringNoTrail(number float64) (noTrail string) {
 	return
 }
 
-func coerceQuestDBToMetrics(table string, response QuestDBSuccessResponse) (metrics []Metric) {
+func coerceQuestDBToMetrics(table string, response QuestDBSuccessResponse) (metrics []interface{}, err error) {
+	switch table {
+	case "pool":
+		pm := new(PoolMetric)
+		for _, row := range response.Dataset {
+			pm.FromQuestDB(response.Columns, row)
+			metrics = append(metrics, *pm)
+		}
+	case "financial":
+		fm := new(FinancialMetric)
+		for _, row := range response.Dataset {
+			fm.FromQuestDB(response.Columns, row)
+			metrics = append(metrics, *fm)
+		}
+	default:
+		err = fmt.Errorf("Unexpected table name: %s", table)
+	}
 	return
 }

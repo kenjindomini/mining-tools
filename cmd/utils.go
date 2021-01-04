@@ -9,7 +9,8 @@ import (
 
 // checkError will log the error and execute additional handling (will not exit or panic on its own)
 // any %s found in formattedMessage will be replaced with err.Error()
-func checkError(err error, formattedMessage string, additionalErrorHandling func()) {
+func checkError(err error, formattedMessage string, additionalErrorHandling func()) (isError bool) {
+	isError = false
 	if err != nil {
 		fmt.Println(err)
 		formattedMessage = strings.ReplaceAll(formattedMessage, "%s", err.Error())
@@ -17,8 +18,9 @@ func checkError(err error, formattedMessage string, additionalErrorHandling func
 		if additionalErrorHandling != nil {
 			additionalErrorHandling()
 		}
-		return
+		isError = true
 	}
+	return
 }
 
 // checkPanic will execute addtional handling, if provided, then log.panic()
